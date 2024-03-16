@@ -224,7 +224,7 @@ class HandGestureRecognition:
                 return
                 self.last_buffer_processed_time = datetime.datetime.now()'''
 
-        # 正規化:　Feed時ではなく、データ取得時に実施する
+        # 正規化: Feed時ではなく、データ取得時に実施する
         # Landmarksのデータ型を表示
         landmark_list = self.calc.convert_to_pixel_coords(
             self.frame_width, self.frame_height, landmarks)
@@ -239,72 +239,82 @@ class HandGestureRecognition:
         self.landmarks_buffer.append(relative_landmark_list)
 
         # 正規化後バッファが一定数に達したら、判定処理を実行
-        if len(self.landmarks_buffer) > self.buffer_size*2:
+        if len(self.landmarks_buffer) > self.buffer_size * 2:
 
-            ####################################
+            print('-'*20)
+
             # 動作検出
             self.handle_movement_detection()
 
-            # x軸、y軸の動作開始・停止をそれぞれ確認している場合
-            if self.fn_flat_movement_detected is not None and self.fn_flat_movement_stopped is not None:
+            landmarks_buffer_copy = self.landmarks_buffer.copy()
 
-                frame_until = len(self.landmarks_buffer) - \
-                    self.fn_flat_movement_stopped + 2
-                landmarks_list_copy = self.landmarks_buffer[
-                    self.fn_flat_movement_detected+1:frame_until]
+            if self.fn_stabilised is not None:
 
-                # バッファサイズ調整
-                buffer_to_process = self.adjust_frame(landmarks_list_copy)
-                print('dynamic-flat')
+                landmarks_buffer_copy = landmarks_buffer_copy[self.fn_stabilised:]
 
-            # z軸の動作開始・停止をそれぞれ確認している場合 → 両変数間のフレームを動作として判定処理を流す
-            elif self.fn_depth_movement_detected is not None and self.fn_depth_movement_stopped is not None:
+                # x軸、y軸の動作開始・停止をそれぞれ確認している場合
+                if self.fn_flat_movement_detected is not None and self.fn_flat_movement_stopped is not None:
 
-                landmarks_list_copy = self.landmarks_buffer[
-                    self.fn_depth_movement_detected:self.fn_depth_movement_stopped+1]
+                    frame_until = len(landmarks_buffer_copy) - \
+                        self.fn_flat_movement_stopped
+                    landmarks_list_copy = landmarks_buffer_copy[
+                        self.fn_flat_movement_detected:frame_until]
 
-                # バッファサイズ調整
-                buffer_to_process = self.adjust_frame(landmarks_list_copy)
-                print('dynamic-depth')
+                    # バッファサイズ調整
+                    buffer_to_process = self.adjust_frame(landmarks_list_copy)
+                    print('Dynamic - Flat: Frame interpolated from {0} until {1}'.format(
+                        self.fn_flat_movement_detected, frame_until))
 
-            # 下記全ての変数がNoneの場合 → 静的指文字として判定処理を流す
-            elif self.fn_flat_movement_detected is None and \
-                    self.fn_flat_movement_stopped is None and \
-                    self.fn_depth_movement_detected is None and \
-                    self.fn_depth_movement_stopped is None:
-                buffer_to_process = self.landmarks_buffer[:self.buffer_size]
-                print('static')
+                # z軸の動作開始・停止をそれぞれ確認している場合 → 両変数間のフレームを動作として判定処理を流す
+                elif self.fn_depth_movement_detected is not None and self.fn_depth_movement_stopped is not None:
 
-            # 指定フレーム数内で動作開始、停止のどちらかしか検知できなかった場合
+                    landmarks_list_copy = landmarks_buffer_copy[
+                        self.fn_depth_movement_detected:self.fn_depth_movement_stopped+1]
+
+                    # バッファサイズ調整
+                    buffer_to_process = self.adjust_frame(landmarks_list_copy)
+                    print('Dynamic - Depth: Frame interpolated from {0} until {1}'.format(
+                        self.fn_depth_movement_detected, self.fn_depth_movement_stopped+1))
+
+                # 下記全ての変数がNoneの場合 → 静的指文字として判定処理を流す
+                elif self.fn_flat_movement_detected is None and \
+                        self.fn_flat_movement_stopped is None and \
+                        self.fn_depth_movement_detected is None and \
+                        self.fn_depth_movement_stopped is None:
+                    buffer_to_process = landmarks_buffer_copy[:self.buffer_size]
+                    print('Static: Frame taken from 0 until {0}'.format(
+                        self.buffer_size))
+
+                # 指定フレーム数内で動作開始、停止のどちらかしか検知できなかった場合
+                else:
+                    print('Error')
+                    return
+                ####################################
             else:
-                print('error')
-                return
-            ####################################
+                # 動作収束が検知されていない場合
+                buffer_to_process = None
 
             # サイズ調整後のバッファがNone、もしくはbuffer_size未満の場合
             if buffer_to_process is None or len(buffer_to_process) < self.buffer_size:
                 self.initialize_buffers()
                 return
 
-            print('buffer_to_process:', len(buffer_to_process))
-            print('='*20)
-
             # 判定処理に流す
             yubimoji, confidence = self.feed_frames.feed(buffer_to_process)
-            '''
+
             self.results_buffer.append(
                 [self.yubimoji_labels[yubimoji], confidence])
 
             # 画面表示
-            self.frame = self.frame_overlay.results(self.results_buffer[-30:])
+            # self.frame = self.frame_overlay.results(self.results_buffer[-30:])
 
             # ランドマーク間の線を表示
             lm_latest = self.landmarks_buffer[-1]
-            self.frame_overlay.lmLines(lm_latest)
+            # self.frame_overlay.lmLines(lm_latest)
 
             # 確認用
-            print('\t', self.frameCount, self.yubimoji_labels[yubimoji],
-                  '{:.2f}%'.format(confidence * 100))'''
+            print('Feed result:', self.yubimoji_labels[yubimoji])
+            print('Confidence:', '{:.2f}%'.format(confidence * 100))
 
             # 判定流したあとはバッファをクリア
             self.initialize_buffers()
@@ -314,19 +324,20 @@ class HandGestureRecognition:
 
         landmarks_list = self.landmarks_buffer.copy()
 
+        self.fn_stabilised = None
         self.fn_flat_movement_detected = None
         self.fn_flat_movement_stopped = None
         self.fn_depth_movement_detected = None
         self.fn_depth_movement_stopped = None
 
         # 初期動作が収束したフレーム番号を検出 / 流したフレームで初期動作があった場合に収束フレームを検出
-        fn_stabilised = self.calc.compare_frame_movement(
+        self.fn_stabilised = self.calc.compare_frame_movement(
             landmarks_list, is_stop_detection=True)
 
-        if fn_stabilised is not None:
+        if self.fn_stabilised is not None:
 
             # 初期動作が収束以降のデータを取得
-            landmarks_list = landmarks_list[fn_stabilised:]
+            landmarks_list = landmarks_list[self.fn_stabilised:]
 
             # 動作の開始を検出 / x-axis & y-axis
             # 過去5フレーム間の変化を検知
@@ -334,7 +345,6 @@ class HandGestureRecognition:
             self.fn_flat_movement_detected = self.calc.compare_frame_movement(
                 landmarks_list)
 
-            print('-'*20)
             # 動作の停止を検出 / x-axis & y-axis
             # 同じ関数を使って、逆順にした過去5フレーム間の変化を検知
             # →後ろからフレームを走査し、動作停止フレームを検出、その番号をfn_flat_movement_stoppedに
@@ -346,16 +356,23 @@ class HandGestureRecognition:
             self.fn_depth_movement_detected, self.fn_depth_movement_stopped = self.calc.compare_palm_length(
                 landmarks_list)
 
-        if self.fn_flat_movement_stopped != None and self.fn_flat_movement_detected != None:
-            print('fn_stabilised:', fn_stabilised)
-            print('fn_flat_movement_detected:', self.fn_flat_movement_detected)
-            print('fn_flat_movement_stopped:', len(
-                landmarks_list) - int(self.fn_flat_movement_stopped))
+            print('Intial movement stablised at:', self.fn_stabilised)
 
-        if self.fn_depth_movement_detected != None and self.fn_depth_movement_stopped != None:
-            print('fn_depth_movement_detected:',
-                  self.fn_depth_movement_detected)
-            print('fn_depth_movement_stopped:', self.fn_depth_movement_stopped)
+            if self.fn_flat_movement_stopped != None:
+                print('Flat movement detected from:',
+                      self.fn_flat_movement_detected)
+
+            if self.fn_flat_movement_detected != None:
+                print('Flat movement detected until:', len(
+                    landmarks_list) - int(self.fn_flat_movement_stopped))
+
+            if self.fn_depth_movement_detected != None:
+                print('Depth movement detected from:',
+                      self.fn_depth_movement_detected)
+
+            if self.fn_depth_movement_stopped != None:
+                print('Depth movement detected until:',
+                      self.fn_depth_movement_stopped)
 
     def adjust_frame(self, landmarks_list):
 
@@ -485,12 +502,8 @@ class Calculate:
                 distance = self.detect_movement(
                     landmarks_list[i - frame_ctrl], landmarks_list[i + 1 - frame_ctrl])
 
-                print(i - frame_ctrl, i + 1 - frame_ctrl, distance)
-
                 if distance <= movement_threshold:
                     nomovement_cnt += 1
-
-            print(i, nomovement_cnt)
 
             if nomovement_cnt >= frame_focus:
                 if is_stop_detection:
@@ -678,7 +691,7 @@ class FeedFrames:
 
         self.isPalmNormalised = isPalmNormalised
 
-        # 予測モデルのロード / あんまり分ける意味ないかも
+        # Load model
         if self.isPalmNormalised:
             tflitePath = "palm_model/keypoint_classifier.tflite"
             self.keypoint_classifier = KeyPointClassifierwithPalm(tflitePath)
@@ -695,10 +708,11 @@ class FeedFrames:
         # バッファ内の各フレームに対する処理
         for landmarks in landmarks_buffer:
 
-            # 正規化
+            # Normalisation
             if self.isPalmNormalised:
                 # 手掌長の取得
                 palm_length = self.calc.palm_length(landmarks)
+
                 lm_normalised = self.calc.normalise(landmarks, palm_length)
 
             else:

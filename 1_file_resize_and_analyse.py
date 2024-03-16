@@ -1,6 +1,6 @@
-##############################################################################
+##############################################################
 # yubimoji.pyで取得したランドマークのフレーム数の調整
-##############################################################################
+##############################################################
 
 # Standard Library
 import csv
@@ -11,6 +11,15 @@ import re
 
 # Third-Party Libraries
 import numpy as np
+import pprint
+
+
+sta_short_frame_files = []
+dyn_short_frame_files = []
+subject_to_downsample_files = []
+dyn_error_files = []
+files_tobetransferred = []
+processed_files = []
 
 
 class LandmarkProcessor:
@@ -182,24 +191,28 @@ class FrameAnalyzer:
 
         return frame_interpolated.tolist()
 
-    def adjust_frame(self, landmarks_list):
+    def adjust_frame(self, landmarks_list, file, is_static=False):
 
         if 1 < len(landmarks_list) < self.frame_size:
-            # フレーム数が足りない場合
-
-            # 線形補間によるフレーム補填処理へ
-            return self.interpolate_frame(landmarks_list)
+            # フレーム数が足りない場合、線形補間によるフレーム補填処理へ
+            processed_files.append(file)
+            landmarks_list_new = self.interpolate_frame(landmarks_list)
+            return landmarks_list_new
 
         elif len(landmarks_list) <= 1:
             # フレームが1個以下の場合は、補填処理を行わず無視
+            sta_short_frame_files.append(
+                file) if is_static else dyn_short_frame_files.append(file)
             return -1
 
         elif len(landmarks_list) > self.frame_size:
-            # フレーム数が多い場合はダウンサンプリングを実施
-            return -2
+            # フレーム数が多い場合はダウンサンプリングを実施 - しない
+            subject_to_downsample_files.append(file)
+            return -1
 
         else:
             # フレーム数がピッタリ設定数の場合は、そのまま
+            processed_files.append(file)
             return landmarks_list
 
 
@@ -234,9 +247,6 @@ class FileManager:
 
         original_landmarks_length = len(landmarks_list)
 
-        '''if yubimoji in [24, 34, 39] or yubimoji in range(44, 76):
-            frame_start_from_ += 0 if fn_flat_movement_detected is None else fn_flat_movement_detected'''
-
         for i in range(len(landmarks_list) - 1):
 
             specStr = f'|| 手掌長: ' + \
@@ -265,6 +275,7 @@ class FileManager:
         else:
             # Static yubimoji
             print('動作開始箇所:\t\t', fn_stabilised)
+
         print('動作停止箇所:\t\t', fn_movement_stopped)
         print('補填前フレーム数:\t', new_frame_length)
 
@@ -276,21 +287,15 @@ class YubimojiAnalyzer:
         self.movement_threshold = 2.0
         self.file_manager = FileManager()
 
-    def analyze(self, is_check_mode=False, reshape_enable=False, file_transfer_enable=False):
+    def analyze(self, is_check_mode=False, reshape_enable=False, file_transfer_enable=False, reshape_palmlen_enable=False):
 
         self.is_check_mode = is_check_mode
         self.reshape_enable = reshape_enable
+        self.reshape_palmlen_enable = reshape_palmlen_enable
         self.file_transfer_enable = file_transfer_enable
 
         self.frame_analyzer = FrameAnalyzer(
-            frame_size, self.movement_threshold, self.is_check_mode)
-
-        # 各種変数名fnはframe numberの略
-        '''fn_stabilised = None
-        fn_flat_movement_detected = None
-        fn_flat_movement_stopped = None
-        fn_depth_movement_detected = None
-        fn_depth_movement_stopped = None'''
+            self.frame_size, self.movement_threshold, self.is_check_mode)
 
         # 確認用変数・リスト
         dyn_cnt = 0
@@ -301,7 +306,7 @@ class YubimojiAnalyzer:
         subject_to_downsample_files = []
         dyn_error_files = []
         files_tobetransferred = []
-        processed_files = []
+        self.processed_files = []
 
         # 読み込むファイルのリストを走査
         for file in self.csv_files:
@@ -320,20 +325,21 @@ class YubimojiAnalyzer:
             if fn_stabilised is not None:
 
                 # 初期動作が収束以降のデータを取得
-                landmarks_list_copy = landmarks_list[fn_stabilised:]
+                landmarks_list = landmarks_list[fn_stabilised:]
 
                 # 動的指文字 - の、も、り、を、ん、濁音、半濁音、促音、拗音
                 if yubimoji in [24, 34, 39] or yubimoji in range(44, 76):
 
                     dyn_cnt += 1
+                    is_static = False
 
                     # 動作開始フレームの番号を取得
                     fn_flat_movement_detected = self.frame_analyzer.compare_frame_movement(
-                        landmarks_list_copy)
+                        landmarks_list)
 
                     # 動的指文字の場合は、後ろからフレームを走査し、動作停止フレームを検出
                     fn_flat_movement_stopped = self.frame_analyzer.compare_frame_movement(
-                        landmarks_list_copy[::-1])
+                        landmarks_list[::-1])
 
                     # 前後動作検知
                     if yubimoji in [45, 71, 72, 73, 74, 75]:
@@ -343,12 +349,15 @@ class YubimojiAnalyzer:
                     # x軸、y軸の動きを検知し、かつその動作の停止を確認している場合
                     if fn_flat_movement_stopped is not None and fn_flat_movement_detected is not None:
 
-                        frame_until = len(landmarks_list_copy) - \
+                        frame_until = len(landmarks_list) - \
                             fn_flat_movement_stopped + 2
 
                         if frame_until <= fn_flat_movement_detected:
                             dyn_error_files.append(file)
                             continue
+
+                        # 動作開始の一つ前のフレームから動作停止までのフレームを取得
+                        landmarks_list_copy = landmarks_list[fn_flat_movement_detected+1:frame_until]
 
                         # 確認用
                         if self.is_check_mode:
@@ -361,26 +370,10 @@ class YubimojiAnalyzer:
                                 len(landmarks_list_copy)
                             )
 
-                        # 動作開始の一つ前のフレームから動作停止までのフレームを取得
-                        landmarks_list_copy = landmarks_list_copy[fn_flat_movement_detected+1:frame_until]
-                        new_landmark_list = self.frame_analyzer.adjust_frame(
-                            landmarks_list_copy)
-
-                        if new_landmark_list == -1:
-                            # フレームが1個以下の場合は、補填処理を行わず無視
-                            dyn_short_frame_files.append(file)
-
-                        elif new_landmark_list == -2:
-                            # フレーム数が多い場合はダウンサンプリングを実施
-                            subject_to_downsample_files.append(file)
-
-                        else:
-                            processed_files.append(file)
-
                     # 奥行き方向の動作がある指文字で、かつz軸の動き (手掌長の変化) が検知し、かつその動作の停止を確認している場合
                     elif fn_depth_movement_detected is not None and yubimoji in [45, 71, 72, 73, 74, 75]:
 
-                        landmarks_list_copy = landmarks_list_copy[
+                        landmarks_list_copy = landmarks_list[
                             fn_depth_movement_detected:fn_depth_movement_stopped+1]
 
                         # 確認用
@@ -394,20 +387,6 @@ class YubimojiAnalyzer:
                                 len(landmarks_list_copy)
                             )
 
-                        new_landmark_list = self.frame_analyzer.adjust_frame(
-                            landmarks_list_copy)
-
-                        if new_landmark_list == -1:
-                            # フレームが1個以下の場合は、補填処理を行わず無視
-                            dyn_short_frame_files.append(file)
-
-                        elif new_landmark_list == -2:
-                            # フレーム数が多い場合はダウンサンプリングを実施
-                            subject_to_downsample_files.append(file)
-
-                        else:
-                            processed_files.append(file)
-
                     # 動作開始フレームが検出できなかった場合、動作停止を検出できなかった場合
                     else:
                         '''if isCheckMode:
@@ -415,12 +394,14 @@ class YubimojiAnalyzer:
                                 print(i, '\t', '{:.2g}'.format(detectMovement(
                                     landmarks_list[i], landmarks_list[i + 1])), '\t', '{:.5g}'.format(calc_PalmLength(landmarks_list[i])))'''
                         dyn_error_files.append(file)
+                        break
 
                 # 静的指文字
                 else:
                     sta_cnt += 1
+                    is_static = True
 
-                    landmarks_list_copy = landmarks_list_copy[:self.frame_size]
+                    landmarks_list_copy = landmarks_list[:self.frame_size]
 
                     # 確認用
                     if self.is_check_mode:
@@ -429,38 +410,51 @@ class YubimojiAnalyzer:
                             yubimoji,
                             fn_stabilised,
                             None,
-                            frame_size,
+                            self.frame_size,
                             len(landmarks_list_copy)
                         )
+                    # --------------------------------------------
 
-                    '''new_landmark_list = self.frame_analyzer.adjust_frame(
-                        landmarks_list_copy)'''
+                new_landmark_list = self.frame_analyzer.adjust_frame(
+                    landmarks_list_copy, file, is_static=is_static)
 
-                    # フレーム数が足りない場合
-                    if 1 < len(landmarks_list_copy) < self.frame_size:
-                        # 線形補間によるフレーム補填処理へ
-                        new_landmark_list = self.frame_analyzer.interpolate_frame(
-                            landmarks_list_copy)
-                        processed_files.append(file)
+                if new_landmark_list == -1:
+                    break
 
-                    elif len(landmarks_list_copy) <= 1:
-                        # フレームが1個以下の場合は、補填処理を行わず無視
-                        sta_short_frame_files.append(file)
+                # --------------------------------------------
+                # 編集中: 手掌長の取得
+                new_landmark_list_palm = new_landmark_list.copy()
+                for i in range(len(new_landmark_list_palm)):
+                    palm_length = LandmarkProcessor.calc_palm_length(
+                        new_landmark_list_palm[i])
+                    new_landmark_list_palm[i].extend([palm_length])
+                # --------------------------------------------
 
-                    else:
-                        # フレーム数が足りている場合は、そのまま
-                        new_landmark_list = landmarks_list_copy
-                        processed_files.append(file)
-
-            # 常に動作していて動作停止検知ができない場合
+            # No motion stop detected - Exclude the file
             else:
                 exceptfiles.append(file)
 
-            # Resize
+            # Write the interpolated landmarks to a new csv file
             if self.reshape_enable and isinstance(new_landmark_list, list) and len(new_landmark_list) == self.frame_size:
 
                 # csv_pathのファイルが存在する場合、削除
                 csv_path = '/Users/yoshifumihanada/Documents/2_study/1_修士/3_副研究/point_history/1_point_history_resized/' + \
+                    os.path.basename(file)
+
+                if os.path.exists(csv_path):
+                    os.remove(csv_path)
+
+                # 処理後のリストをcsvに書き込む
+                with open(csv_path, 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    for row in new_landmark_list:
+                        writer.writerow([yubimoji] + row)
+
+            # Write the interpolated landmarks with palm length to a new csv file
+            if self.reshape_palmlen_enable and isinstance(new_landmark_list_palm, list) and len(new_landmark_list_palm) == self.frame_size:
+
+                # csv_pathのファイルが存在する場合、削除
+                csv_path = '/Users/yoshifumihanada/Documents/2_study/1_修士/3_副研究/point_history/3_point_history_palm/' + \
                     os.path.basename(file)
 
                 if os.path.exists(csv_path):
@@ -491,7 +485,7 @@ class YubimojiAnalyzer:
                     '* More than 1 file(s) are moved to {0}. Check them and re-record.'.format(dir_name))
 
         # Summary
-        print('====================================')
+        print('##############################################################')
         print('dyn: Files with no motion & motion-stop detected:',
               '\n\t'.join(dyn_error_files))
         print('dyn: Files to be downsampled:',
@@ -502,8 +496,9 @@ class YubimojiAnalyzer:
               '\n\t'.join(sta_short_frame_files))
         print('error: No motion stop detected:',
               '\n\t'.join(exceptfiles))
+        print('##############################################################\n')
 
-        print('====================================')
+        print('##############################################################')
         print('All files:', len(self.csv_files))
         print(' - Dynamic yubimoji files:', dyn_cnt)
         print('   - Successfully processed:', dyn_cnt - len(subject_to_downsample_files) -
@@ -518,8 +513,9 @@ class YubimojiAnalyzer:
               sta_cnt - len(sta_short_frame_files))
         print('   - Files with insufficient frames:', len(sta_short_frame_files))
         print(' - Error files', len(exceptfiles))
+        print('##############################################################\n')
 
-        print('====================================')
+        print('##############################################################')
 
         # Count necessary files
         distance_list = ['30cm', '50cm', '70cm']
@@ -530,19 +526,17 @@ class YubimojiAnalyzer:
         for row in sorted_list:
             print(row)
         print("Total necessary files:", total_necessary_files)
-
-        print('====================================')
+        print('##############################################################')
 
 
 # Main function
 
-# パスで指定したファイルの一覧をリスト形式で取得
+# Directories where csv files are stored
 csv_files = glob.glob(
-    '/Users/yoshifumihanada/Documents/2_study/1_修士/3_副研究/point_history/0_point_history/*.csv')
+    '/Users/yoshifumihanada/Documents/2_study/1_修士/3_副研究/point_history/0_point_history copy/*.csv')
 
-frame_size = 15
-
-analyzer = YubimojiAnalyzer(csv_files, frame_size)
+analyzer = YubimojiAnalyzer(csv_files, frame_size=15)
 analyzer.analyze(is_check_mode=False,
-                 reshape_enable=True,
-                 file_transfer_enable=True)
+                 reshape_enable=False,
+                 file_transfer_enable=True,
+                 reshape_palmlen_enable=True)
