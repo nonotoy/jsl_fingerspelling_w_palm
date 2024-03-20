@@ -528,15 +528,15 @@ class YubimojiAnalyzer:
         print("Total necessary files:", total_necessary_files)
         print('##############################################################')
 
-
 # Main function
+
 
 # Directories where csv files are stored
 csv_files = glob.glob(
-    '/Users/yoshifumihanada/Documents/2_study/1_修士/3_副研究/point_history/0_point_history copy/*.csv')
+    '/Users/yoshifumihanada/Documents/2_study/1_修士/3_副研究/point_history/0_point_history/*.csv')
 
 analyzer = YubimojiAnalyzer(csv_files, frame_size=15)
 analyzer.analyze(is_check_mode=False,
-                 reshape_enable=False,
+                 reshape_enable=True,
                  file_transfer_enable=True,
                  reshape_palmlen_enable=True)

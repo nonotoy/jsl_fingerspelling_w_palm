@@ -10,15 +10,7 @@ import os
 import pandas as pd
 
 
-def main(buffer_size=15):
-
-    # 入力元・出力先指定
-    parent_dir = '/Users/yoshifumihanada/Documents/2_study/1_修士/3_副研究/'
-    import_crt = '1_point_history_resized/*.csv'
-    export_file = 'point_history/point_history_combined.csv'
-
-    import_dir = parent_dir + import_crt
-    export_file = parent_dir + export_file
+def main(import_dir, export_file, buffer_size=15):
 
     # 出力先のファイルが存在する場合、削除
     if os.path.exists(export_file):
@@ -37,8 +29,7 @@ def main(buffer_size=15):
         csv_ = pd.read_csv(file, header=None)
 
         if len(csv_) == buffer_size:
-            csv_ = csv_.tail(buffer_size)
-            data_list.append(csv_)
+            data_list.append(csv_.tail(buffer_size))
         else:
             print('File size is not enough.')
 
@@ -49,4 +40,15 @@ def main(buffer_size=15):
     df.to_csv(export_file, index=False, header=False)
 
 
-main()
+# w/o palm
+import_dir = '/Users/yoshifumihanada/Documents/2_study/1_修士/3_副研究/point_history/1_point_history_resized/*.csv'
+export_file = '/Users/yoshifumihanada/Documents/2_study/1_修士/3_副研究/point_history/point_history_combined.csv'
+
+main(import_dir, export_file)
+
+
+# w/ palm
+import_dir = '/Users/yoshifumihanada/Documents/2_study/1_修士/3_副研究/point_history/3_point_history_palm/*.csv'
+export_file = '/Users/yoshifumihanada/Documents/2_study/1_修士/3_副研究/point_history/point_history_palm_combined.csv'
+
+main(import_dir, export_file)
