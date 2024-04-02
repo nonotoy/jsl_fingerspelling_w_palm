@@ -1,1 +1,1 @@
-from model.keypoint_classifier import KeyPointClassifier
+from base_model.keypoint_classifier import KeyPointClassifier

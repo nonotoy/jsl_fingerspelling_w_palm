@@ -8,7 +8,6 @@ import datetime
 import time
 import csv
 import math
-import copy
 import itertools
 
 # Third-Party Libraries
@@ -16,10 +15,12 @@ import cv2
 import numpy as np
 import mediapipe as mp
 from PIL import ImageFont, ImageDraw, Image
+import joblib
 
 # Local Libraries
-from model import KeyPointClassifier as KeyPointClassifier
+from base_model import KeyPointClassifier as KeyPointClassifier
 from palm_model import KeyPointClassifier as KeyPointClassifierwithPalm
+from palm_normalised_model import KeyPointClassifier as KeyPointClassifierwithNormalisedPalm
 
 
 class HandGestureRecognition:
@@ -53,7 +54,7 @@ class HandGestureRecognition:
         # Initialize working directory
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-        # Load MediaPip
+        # Load MediaPipe
         self.hands = mp.solutions.hands.Hands(
             max_num_hands=1,
             min_detection_confidence=0.8,
@@ -137,7 +138,7 @@ class HandGestureRecognition:
                 int(self.video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
             ), (255, 255, 255), -1)
 
-        # FPSの表示
+            # FPSの表示
             cv2.putText(self.frame, str(int(self.fps)), (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1, cv2.LINE_AA)
 
@@ -693,11 +694,15 @@ class FeedFrames:
 
         # Load model
         if self.isPalmNormalised:
-            tflitePath = "palm_model/keypoint_classifier.tflite"
-            self.keypoint_classifier = KeyPointClassifierwithPalm(tflitePath)
+            # tflitePath = "palm_model/keypoint_classifier.tflite"
+            # self.keypoint_classifier = KeyPointClassifierwithPalm(tflitePath)
+            file_path = 'palm_normalised_model/gesture_classifier.pkl'
+            # KeyPointClassifierwithPalm(tflitePath)を使わないといけない
+            self.keypoint_classifier = joblib.load(file_path)
+
         else:
-            tflitePath = "model/keypoint_classifier.tflite"
-            self.keypoint_classifier = KeyPointClassifier(tflitePath)
+            file_path = 'base_model/gesture_classifier.pkl'
+            self.keypoint_classifier = joblib.load(file_path)
 
         self.calc = Calculate()
 
