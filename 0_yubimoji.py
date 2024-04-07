@@ -190,17 +190,13 @@ class HandGestureRecognition:
     def handle_recording_mode(self, landmarks):
         # 録画モードの処理
 
-        # 正規化 ##################################################################
         # Landmarksのデータ型を表示
         landmark_list = self.calc.convert_to_pixel_coords(
             self.frame_width, self.frame_height, landmarks)
 
         # 相対座標に変換
-        # 正規化は実施せずにそのままの座標を取得 / LSTMに通す前の事後処理にて正規化を都度実施
         relative_landmark_list = self.calc.convert_to_relative_coordinates(
             landmark_list)
-
-        # 正規化は実施せずにそのままの座標を取得 / LSTMに通す前の事後処理にて正規化を都度実施
 
         # 画面表示 ################################################################
         # ランドマーク間の線を表示
@@ -225,7 +221,6 @@ class HandGestureRecognition:
                 return
                 self.last_buffer_processed_time = datetime.datetime.now()'''
 
-        # 正規化: Feed時ではなく、データ取得時に実施する
         # Landmarksのデータ型を表示
         landmark_list = self.calc.convert_to_pixel_coords(
             self.frame_width, self.frame_height, landmarks)
