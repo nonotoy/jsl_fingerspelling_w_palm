@@ -1,1 +1,1 @@
-__Enhancing Classification Accuracy of Japanese Sign Language Dynamic Fingerspelling by Incorporating Depth Information with MediaPipe__
+__Investigating the Enhancement of Classification Accuracy of Japanese Sign Language Fingerspelling by Incorporating Palm Length__
