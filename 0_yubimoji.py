@@ -13,22 +13,34 @@ import itertools
 # Third-Party Libraries
 import cv2
 import numpy as np
+import tensorflow as tf
 import mediapipe as mp
 from PIL import ImageFont, ImageDraw, Image
-import joblib
 
-# Local Libraries
-from base_model import KeyPointClassifier as KeyPointClassifier
-from palm_model import KeyPointClassifier as KeyPointClassifierwithPalm
-from palm_normalised_model import KeyPointClassifier as KeyPointClassifierwithNormalisedPalm
+# Local Modules
+
+
+class KeyPointClassifier(object):
+    def __init__(self, model_path):
+        self.model = tf.keras.models.load_model(model_path)
+
+    def __call__(self, landmark_list):
+
+        input_data = np.expand_dims(landmark_list, axis=0)
+        result = self.model.predict(input_data)
+        result_index = np.argmax(np.squeeze(result))
+        confidence = np.max(np.squeeze(result))
+
+        # 結果のインデックスと信頼度を返す
+        return result_index, confidence
 
 
 class HandGestureRecognition:
-    def __init__(self, mode, recording_times=None, yubimoji_id=None, isPalmNormalised=False):
+    def __init__(self, mode, recording_times=None, yubimoji_id=None, modelno=0):
         self.mode = mode
         self.yubimoji_id = yubimoji_id
         self.recording_times = recording_times
-        self.isPalmNormalised = isPalmNormalised
+        self.modelno = modelno
 
         # ラベルの読み込み
         labelFilePath = 'setting/hand_keypoint_classifier_label.csv'
@@ -44,11 +56,13 @@ class HandGestureRecognition:
             else:
                 print("yubimoji_id:", self.yubimoji_labels[self.yubimoji_id])
 
-        self.feed_frames = FeedFrames(self.isPalmNormalised)
+        self.feed_frames = FeedFrames(self.modelno)
         self.calc = Calculate()
         self.write_csv = WriteCSV()
 
         self.setup()
+
+        print('dd')
 
     def setup(self):
         # Initialize working directory
@@ -683,21 +697,30 @@ class FrameOverlay:
 
 # recognition
 class FeedFrames:
-    def __init__(self, isPalmNormalised):
+    def __init__(self, modelno):
 
-        self.isPalmNormalised = isPalmNormalised
+        self.modelno = modelno
+        # self.keypoint_classifier = KeyPointClassifier()
+
+        # print('AAAAA')
 
         # Load model
-        if self.isPalmNormalised:
-            # tflitePath = "palm_model/keypoint_classifier.tflite"
-            # self.keypoint_classifier = KeyPointClassifierwithPalm(tflitePath)
-            file_path = 'palm_normalised_model/gesture_classifier.pkl'
-            # KeyPointClassifierwithPalm(tflitePath)を使わないといけない
-            self.keypoint_classifier = joblib.load(file_path)
+        if self.modelno == 0:
+            modelPath = "palm_normalised_model/gesture_classifier.h5"
+            self.model = KeyPointClassifier(modelPath)
+
+        elif self.modelno == 1:
+            modelPath = "palm_model/gesture_classifier.h5"
+            self.model = KeyPointClassifier(modelPath)
+
+        elif self.modelno == 2:
+            modelPath = 'base_model/gesture_classifier.h5'
+            self.model = KeyPointClassifier(modelPath)
 
         else:
-            file_path = 'base_model/gesture_classifier.pkl'
-            self.keypoint_classifier = joblib.load(file_path)
+            raise ValueError("Invalid model number.")
+
+        # print('aa')
 
         self.calc = Calculate()
 
@@ -708,8 +731,14 @@ class FeedFrames:
         # バッファ内の各フレームに対する処理
         for landmarks in landmarks_buffer:
 
-            # Normalisation
-            if self.isPalmNormalised:
+            # 20240410 対応中----------------------------------------------------------------
+            if self.modelno == 0:
+                # 手掌長の取得
+                palm_length = self.calc.palm_length(landmarks)
+
+                lm_normalised = self.calc.normalise(landmarks, palm_length)
+
+            elif self.modelno == 1:
                 # 手掌長の取得
                 palm_length = self.calc.palm_length(landmarks)
 
@@ -718,6 +747,8 @@ class FeedFrames:
             else:
                 lm_normalised = self.calc.normalise(landmarks)
 
+            # 20240410 対応中----------------------------------------------------------------
+
             # 正規化後のランドマークをバッファごとに保管
             lm_normalised_buffer.append(lm_normalised)
 
@@ -725,7 +756,8 @@ class FeedFrames:
         lm_list = np.array(lm_normalised_buffer, dtype=np.float32)
         lm_list = np.expand_dims(lm_list, axis=0)  # (1, 30, 40)
 
-        yubimoji_id, confidence = self.keypoint_classifier(lm_list)
+        yubimoji_id, confidence = self.model(lm_list)
+        # yubimoji_id, confidence = self.keypoint_classifier(lm_list)
 
         # 結果の表示
         confidence_threshold = 0.5
@@ -760,7 +792,7 @@ class WriteCSV:
             writer.writerow([yubimoji_id, *landmark_list])
 
 
-def main(mode, yubimoji_id=None, recording_times=None, isPalmNormalised=False):
+def main(mode, yubimoji_id=None, recording_times=None):
     # インスタンスの生成と実行
     try:
 
@@ -770,11 +802,11 @@ def main(mode, yubimoji_id=None, recording_times=None, isPalmNormalised=False):
                 mode, yubimoji_id=yubimoji_id, recording_times=recording_times)
 
         elif mode == 1:
-            # hand_recognition = HandGestureRecognition(mode)
+            # 判別モード
 
-            # 掌長で正規化したモデル
+            # modelno: 0 - 手掌長正規化モデル, 1 - 手掌長非正規化モデル, 2 - ベースモデル
             hand_recognition = HandGestureRecognition(
-                mode=1, isPalmNormalised=False)
+                mode, modelno=2)
 
         hand_recognition.run()
 
