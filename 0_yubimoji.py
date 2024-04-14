@@ -17,22 +17,54 @@ import tensorflow as tf
 import mediapipe as mp
 from PIL import ImageFont, ImageDraw, Image
 
-# Local Modules
-
 
 class KeyPointClassifier(object):
     def __init__(self, model_path):
-        self.model = tf.keras.models.load_model(model_path)
+        self.model = tf.keras.models.load_model(
+            model_path, custom_objects={'EnsembleModel': EnsembleModel})
+
+        self.model.compile(
+            optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
     def __call__(self, landmark_list):
 
         input_data = np.expand_dims(landmark_list, axis=0)
+        input_data = np.squeeze(input_data, axis=1)
         result = self.model.predict(input_data)
         result_index = np.argmax(np.squeeze(result))
         confidence = np.max(np.squeeze(result))
 
         # 結果のインデックスと信頼度を返す
         return result_index, confidence
+
+
+class EnsembleModel(tf.keras.layers.Layer):
+    def __init__(self, models):
+        super(EnsembleModel, self).__init__()
+        self.models = models
+
+    def call(self, inputs):
+        predictions = []
+        for model in self.models:
+            pred = model(inputs)
+            predictions.append(pred)
+
+        ensemble_pred = tf.keras.backend.mean(
+            tf.keras.backend.stack(predictions), axis=0)
+        return ensemble_pred
+
+    def get_config(self):
+        config = super(EnsembleModel, self).get_config()
+        config.update({
+            'models': [model.get_config() for model in self.models]
+        })
+        return config
+
+    @classmethod
+    def from_config(cls, config):
+        models = [tf.keras.Sequential.from_config(
+            model_config) for model_config in config['models']]
+        return cls(models)
 
 
 class HandGestureRecognition:
