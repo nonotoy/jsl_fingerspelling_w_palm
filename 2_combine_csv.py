@@ -62,7 +62,7 @@ def main(import_dir, export_file, buffer_size=15, withPalm=False, palmlengthNorm
         for landmarks in landmarks_list:
 
             # Fetch yubimoji ID
-            yubimoji = landmarks[0]
+            yubimoji = int(landmarks[0])
 
             if withPalm:
                 # Fetch palmlength

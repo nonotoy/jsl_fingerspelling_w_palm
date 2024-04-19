@@ -21,21 +21,20 @@ from PIL import ImageFont, ImageDraw, Image
 class KeyPointClassifier(object):
     def __init__(self, model_path):
         self.model = tf.keras.models.load_model(
-            model_path, custom_objects={'EnsembleModel': EnsembleModel})
+            model_path, custom_objects={'EnsembleModel': EnsembleModel}, compile=False)
 
-        self.model.compile(
-            optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+        # self.model.compile( optimizer='nadam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
     def __call__(self, landmark_list):
 
         input_data = np.expand_dims(landmark_list, axis=0)
         input_data = np.squeeze(input_data, axis=1)
         result = self.model.predict(input_data)
-        result_index = np.argmax(np.squeeze(result))
-        confidence = np.max(np.squeeze(result))
+        result_index = np.argmax(result, axis=-1)
+        confidence = np.max(result, axis=-1)
 
         # 結果のインデックスと信頼度を返す
-        return result_index, confidence
+        return result_index[0], confidence[0]
 
 
 class EnsembleModel(tf.keras.layers.Layer):
@@ -93,8 +92,6 @@ class HandGestureRecognition:
         self.write_csv = WriteCSV()
 
         self.setup()
-
-        print('dd')
 
     def setup(self):
         # Initialize working directory
@@ -202,12 +199,13 @@ class HandGestureRecognition:
         else:
             # 入力がない場合
             self.handle_no_input()
+            return False
 
         # 現在保持しているのフレームの番号を表示
         self.frameCount += 1
 
         # 画像の表示
-        # cv2.imshow("MediaPipe Hands", self.frame)
+        cv2.imshow("MediaPipe Hands", self.frame)
 
         return False
 
@@ -249,8 +247,8 @@ class HandGestureRecognition:
         self.frame_overlay.lmLines(landmarks)
 
         # 文字表示
-        # yubimoji = self.yubimoji_labels[self.yubimoji_id]
-        # self.frame = self.frame_overlay.jpn_text(yubimoji)
+        yubimoji = self.yubimoji_labels[self.yubimoji_id]
+        self.frame = self.frame_overlay.jpn_text(yubimoji)
 
         # 書き出し ################################################################
         self.write_csv.run(relative_landmark_list,
@@ -351,7 +349,7 @@ class HandGestureRecognition:
             # self.frame = self.frame_overlay.results(self.results_buffer[-30:])
 
             # ランドマーク間の線を表示
-            lm_latest = self.landmarks_buffer[-1]
+            lm_latest = landmarks  # self.landmarks_buffer[-1]
             # self.frame_overlay.lmLines(lm_latest)
 
             # 確認用
@@ -498,16 +496,6 @@ class Calculate:
 
         return relative_landmark_list
 
-    def normalise(self, landmark_list, palm_length=None):
-        # 手掌長で正規化
-
-        norm_factor = max(
-            abs(n) for n in landmark_list) if palm_length == None else palm_length
-
-        # 正規化処理
-        normalized_landmark_list = [n / norm_factor for n in landmark_list]
-        return normalized_landmark_list
-
     @staticmethod
     def detect_movement(lm_a, lm_b):
         # ランドマーク間の距離を計算する関数
@@ -614,6 +602,13 @@ class Calculate:
             )
 
         return frame_interpolated.tolist()
+
+    def max_normalise(self, cor_list):
+        max_val = max(cor_list)
+        min_val = min(cor_list)
+        norm_factor = max(abs(max_val), abs(min_val))
+        normalized_cor_list = [n / norm_factor for n in cor_list]
+        return normalized_cor_list
 
 
 # フレーム描画用のクラス
@@ -734,8 +729,6 @@ class FeedFrames:
         self.modelno = modelno
         # self.keypoint_classifier = KeyPointClassifier()
 
-        # print('AAAAA')
-
         # Load model
         if self.modelno == 0:
             modelPath = "palm_normalised_model/gesture_classifier.h5"
@@ -752,47 +745,36 @@ class FeedFrames:
         else:
             raise ValueError("Invalid model number.")
 
-        # print('aa')
-
         self.calc = Calculate()
 
     def feed(self, landmarks_buffer):
 
-        lm_normalised_buffer = []
+        feed_buffer = landmarks_buffer.copy()
 
-        # バッファ内の各フレームに対する処理
-        for landmarks in landmarks_buffer:
+        # 手掌長を使ったモデル
+        if self.modelno < 2:
 
-            # 20240410 対応中----------------------------------------------------------------
-            if self.modelno == 0:
-                # 手掌長の取得
-                palm_length = self.calc.palm_length(landmarks)
+            # バッファごとに手掌長取得
+            lm_palm_buffer = [self.calc.palm_length(
+                landmarks) for landmarks in feed_buffer]
 
-                lm_normalised = self.calc.normalise(landmarks, palm_length)
+        # フレーム内正規化手掌長モデル: バッファが溜まり切ってからフレーム内正規化の実施
+        if self.modelno == 0:
+            lm_palm_buffer = self.calc.max_normalise(lm_palm_buffer)
 
-            elif self.modelno == 1:
-                # 手掌長の取得
-                palm_length = self.calc.palm_length(landmarks)
+        if self.modelno < 2:  # 手掌長モデル
 
-                lm_normalised = self.calc.normalise(landmarks, palm_length)
+            for i, _ in enumerate(feed_buffer):
+                feed_buffer[i] = feed_buffer[i] + [lm_palm_buffer[i]]
 
-            else:
-                lm_normalised = self.calc.normalise(landmarks)
-
-            # 20240410 対応中----------------------------------------------------------------
-
-            # 正規化後のランドマークをバッファごとに保管
-            lm_normalised_buffer.append(lm_normalised)
+        lm_list = np.array(feed_buffer, dtype=np.float32)
+        lm_list = np.expand_dims(lm_list, axis=0)  # (1, 15, 40) or (1, 15, 41)
 
         # 文字の予測
-        lm_list = np.array(lm_normalised_buffer, dtype=np.float32)
-        lm_list = np.expand_dims(lm_list, axis=0)  # (1, 30, 40)
-
         yubimoji_id, confidence = self.model(lm_list)
-        # yubimoji_id, confidence = self.keypoint_classifier(lm_list)
 
         # 結果の表示
-        confidence_threshold = 0.5
+        confidence_threshold = 0.1  # 0.5
 
         if confidence > confidence_threshold:
             return yubimoji_id, confidence
@@ -838,7 +820,7 @@ def main(mode, yubimoji_id=None, recording_times=None):
 
             # modelno: 0 - 手掌長正規化モデル, 1 - 手掌長非正規化モデル, 2 - ベースモデル
             hand_recognition = HandGestureRecognition(
-                mode, modelno=2)
+                mode, modelno=0)
 
         hand_recognition.run()
 
@@ -847,12 +829,11 @@ def main(mode, yubimoji_id=None, recording_times=None):
 
 
 if __name__ == "__main__":
-    main(1)
+    main(0)
 
-    '''
     # 録画モード
-    times = 1
-    start_id = 71
+    times = 2
+    start_id = 73
     end_id = start_id + 1
 
     for yubimoji_id in range(start_id, end_id):
@@ -868,7 +849,6 @@ if __name__ == "__main__":
 
         print("------------------")
         time.sleep(10)
-    '''
 
 '''
 0: あ	1: い	2: う	3: え	4: お   5: か	6: き	7: く	8: け	9: こ	

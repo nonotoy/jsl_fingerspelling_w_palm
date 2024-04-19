@@ -1,3 +1,0 @@
-
-def createLSTMModel():
-    pass
